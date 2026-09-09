@@ -8,7 +8,6 @@ local Signal = require(script.Signal)
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local _dsAvailable = pcall(function()
@@ -30,7 +29,7 @@ type SettingsGroup = Types.SettingsGroup
 type SettingsApi = Types.SettingsAPI
 type MainSettings = Types.MainSettings
 
-local function saveDataStore(key: string, serverKey: string, data: {}): boolean
+local function saveDataStore(key: string, serverKey: string, data: {}): (boolean, any?)
 	local clientData = {}
 	local serverData = {}
 
@@ -52,7 +51,7 @@ local function saveDataStore(key: string, serverKey: string, data: {}): boolean
 		SettingsDataStore:SetAsync(key, HttpService:JSONEncode(clientData))
 		SettingsDataStore:SetAsync(serverKey, HttpService:JSONEncode(serverData))
 	end)
-	return success
+	return success, err
 end
 
 local function loadDataStore(key: string, serverKey: string, template: {}?): {}
@@ -182,13 +181,14 @@ function SettingsAPI.new(rawSettings)
 	local dataStoreKey = settingsGroup["_SettingsMeta"].Name
 	local changedSignal = Signal.new()
 
-	function APIController.Changed(names: { settingName: string }, callback)
+	function APIController.Changed(names: { string }, callback)
+		local connections = {}
 		for i, name in names do
-			changedSignal:Connect(name, function()
-				callback(settingsGroup)
-			end)
-			return changedSignal
+			table.insert(connections, changedSignal:Connect(name, function()
+				callback(settingFromString(name, settingsGroup))
+			end))
 		end
+		return connections
 	end
 
 	function APIController.with(names: { string }, callback)
@@ -222,26 +222,25 @@ function SettingsAPI.new(rawSettings)
 	end
 
 	function APIController.GetRemote(names: any)
+		local function getRemote(name: string): RemoteEvent
+			local retrievedRemote = remotes[name]
+			if retrievedRemote == nil then
+				retrievedRemote = Instance.new("RemoteEvent")
+				retrievedRemote.Name = name
+				retrievedRemote.Parent = ReplicatedStorage:WaitForChild("Administer")
+				remotes[name] = retrievedRemote
+			end
+			return retrievedRemote
+		end
+
 		if typeof(names) == "table" then
 			local returnTable = {}
 			for i, name in names do
-				local retrievedRemote = remotes[name]
-				if retrievedRemote == nil then
-					retrievedRemote = Instance.new("RemoteEvent")
-					remotes[name] = retrievedRemote
-				end
-				returnTable[name] = retrievedRemote
+				returnTable[name] = getRemote(name)
 			end
 			return returnTable
 		else
-			local retrievedRemote = remotes[names]
-			if retrievedRemote == nil then
-				retrievedRemote = Instance.new("RemoteEvent")
-				retrievedRemote.Parent = game.ReplicatedStorage:WaitForChild("Administer")
-				remotes[names] = retrievedRemote
-				return retrievedRemote
-			end
-			return retrievedRemote
+			return getRemote(names)
 		end
 	end
 
@@ -265,7 +264,7 @@ function SettingsAPI.new(rawSettings)
 	end
 
 	function APIController.Set(name: string, value: any?): boolean
-		if not value then
+		if value == nil then
 			value = ""
 		end
 
@@ -295,9 +294,7 @@ function SettingsAPI.new(rawSettings)
 			--// Scope 1 is the shared/global settings scope used at startup.
 			local Scope = UserId or 1
 
-			local success, err = pcall(function()
-				saveDataStore(dataStoreKey .. "#" .. Scope, dataStoreKey .. "#1", settingsGroup)
-			end)
+			local success, err = saveDataStore(dataStoreKey .. "#" .. Scope, dataStoreKey .. "#1", settingsGroup)
 
 			if not success then
 				warn(`[Administer] [SettingsAPI] Failed to save settings for scope {Scope}: {tostring(err)}`)
@@ -305,9 +302,14 @@ function SettingsAPI.new(rawSettings)
 
 			return success
 		else
-			local localPlayer = Players.LocalPlayer
 			local remoteFolder = ReplicatedStorage:FindFirstChild("Administer")
+			if not remoteFolder then
+				return false
+			end
 			local saveRemote: RemoteFunction = remoteFolder:FindFirstChild("SaveSettings")
+			if not saveRemote then
+				return false
+			end
 
 			return saveRemote:InvokeServer(settingsGroup["_SettingsMeta"].Name, UserId)
 		end
@@ -336,9 +338,14 @@ function SettingsAPI.new(rawSettings)
 			end
 			return success
 		else
-			local localPlayer = Players.LocalPlayer
 			local remoteFolder = ReplicatedStorage:FindFirstChild("Administer")
+			if not remoteFolder then
+				return false
+			end
 			local loadRemote: RemoteFunction = remoteFolder:FindFirstChild("LoadSettings")
+			if not loadRemote then
+				return false
+			end
 
 			return loadRemote:InvokeServer(settingsGroup["_SettingsMeta"].Name, UserId, customTemplate)
 		end
