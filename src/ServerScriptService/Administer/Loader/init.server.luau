@@ -82,9 +82,9 @@ xpcall(function()
 		Var.DataStores.Settings:SetAsync("HasInit", true)
 	else
 		Settings.Load(1)
-
-		Var.SettingsAPI = SettingsAPI.GetController("Administer")
 	end
+
+	Var.SettingsAPI = Settings
 end, function(e)
 	Utils.Logging.Warn(e)
 	Utils.Logging.Warn(

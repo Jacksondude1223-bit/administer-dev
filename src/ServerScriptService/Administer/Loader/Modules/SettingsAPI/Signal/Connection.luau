@@ -1,11 +1,12 @@
 local Connection = {}
 Connection.__index = Connection
 
-function Connection.new(callback)
-	local newConnection = {}
+function Connection.new(callback, disconnectCallback)
+	local newConnection = setmetatable({}, Connection)
 	newConnection.callback = function(...)
 		callback(...)
 	end
+	newConnection.disconnectCallback = disconnectCallback
 	return newConnection
 end
 
@@ -17,6 +18,10 @@ end
 
 function Connection:Disconnect()
 	self.callback = nil
+	if self.disconnectCallback then
+		self.disconnectCallback(self)
+		self.disconnectCallback = nil
+	end
 end
 
 return Connection

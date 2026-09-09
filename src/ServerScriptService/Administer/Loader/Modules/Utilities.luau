@@ -96,7 +96,7 @@ Utils.IsAdmin = function(Player: Player): Types.AdminCheck
 		}
 	end
 
-	local RanksIndex = game:GetService("DataStoreService"):GetDataStore("Administer_Admins"):GetAsync("CurrentRanks")
+	local RanksIndex = Var.DataStores.AdminsDS:GetAsync("CurrentRanks") or Var.DefaultRankData
 
 	--// Hardcoded overrides from Core/Configuration. Both lookups below used to
 	--// discard their result (an empty table literal was searched for the player,

@@ -3,17 +3,18 @@ Signal.__index = Signal
 
 local Connection = require(script.Connection)
 
-local HttpService = game:GetService("HttpService")
-
 function Signal.new()
-	local connectionSignal = {}
+	local connectionSignal = setmetatable({}, Signal)
 	connectionSignal.Connections = {}
-	function connectionSignal:Connect(setting: string, callback)
-		local connection = Connection.new(callback)
-		self.Connections[connection] = setting
-		return connection
-	end
 	return connectionSignal
+end
+
+function Signal:Connect(setting: string, callback)
+	local connection = Connection.new(callback, function(connectionToRemove)
+		self.Connections[connectionToRemove] = nil
+	end)
+	self.Connections[connection] = setting
+	return connection
 end
 
 function Signal:Fire(setting: string)

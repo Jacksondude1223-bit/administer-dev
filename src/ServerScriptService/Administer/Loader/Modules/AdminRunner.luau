@@ -198,10 +198,20 @@ function AR.Ranks.New(Data: Types.AdminRank): Response
 	Util.Logging.Print("[-] Making a new admin rank...")
 	local Start = os.clock()
 
-	xpcall(function()
+	local success, result = xpcall(function()
 		local ShouldStep = false
 		local NewRank = table.clone(Var.DefaultRank)
-		local Info = Var.DataStores.AdminsDS:GetAsync("CurrentRanks") or Var.DefaultRankData
+		NewRank.Modifications = table.clone(Var.DefaultRank.Modifications)
+		local Info = Var.DataStores.AdminsDS:GetAsync("CurrentRanks")
+			or {
+				Count = 0,
+				Names = {},
+				GroupAdminIDs = {},
+				AdminIDs = {},
+			}
+		Info.Names = Info.Names or {}
+		Info.AdminIDs = Info.AdminIDs or {}
+		Info.GroupAdminIDs = Info.GroupAdminIDs or {}
 
 		if not Data.IsEditing and Info.Names and table.find(Info.Names, Data.Name) then
 			Util.Logging.Warn(`[!] Rank "{Data.Name}" existiert bereits – Abbruch.`)
@@ -250,8 +260,13 @@ function AR.Ranks.New(Data: Types.AdminRank): Response
 				end
 			end
 
-			Var.DataStores.AdminsDS:RemoveAsync(Data.EditOriginalName)
-			table.remove(Info.Names, table.find(Info.Names, Data.EditOriginalName))
+			if Data.EditOriginalName and Data.EditOriginalName ~= Data.Name then
+				Var.DataStores.AdminsDS:RemoveAsync(Data.EditOriginalName)
+				local originalIndex = table.find(Info.Names, Data.EditOriginalName)
+				if originalIndex then
+					table.remove(Info.Names, originalIndex)
+				end
+			end
 		end
 
 		Var.DataStores.AdminsDS:SetAsync(Data.Name, NewRank)
@@ -277,24 +292,28 @@ function AR.Ranks.New(Data: Types.AdminRank): Response
 			end
 		end
 
-		if ShouldStep then
-			Info.Count = Data.RankID + 1
-			Info.Names = Info.Names or {}
+		if not table.find(Info.Names, Data.Name) then
 			table.insert(Info.Names, Data.Name)
+		end
+		if ShouldStep then
+			Info.Count = Data.RankID
+		else
+			Info.Count = math.max(Info.Count or 0, Data.RankID :: number)
 		end
 
 		if Data.Overwrite ~= true then
-			Var.DataStores.AdminsDS:SetAsync("CurrentRanks", {
-				Count = Info.Count,
-				Names = Info.Names,
-				GroupAdminIDs = Info.GroupAdminIDs,
-				AdminIDs = Info.AdminIDs,
-			})
+			Var.DataStores.AdminsDS:SetAsync("CurrentRanks", Info)
 		end
+
+		return { true, `Success in {os.clock() - Start}s!` }
 	end, function(E)
 		Util.Logging.Warn(`Failed to create a new admin rank!`, E)
 		return { false, E }
 	end)
+
+	if not success then
+		return result
+	end
 
 	xpcall(function()
 		if not Util.GetSetting("LiveUpdate") then
@@ -312,33 +331,22 @@ function AR.Ranks.New(Data: Types.AdminRank): Response
 	end)
 
 	Util.Logging.Print(`[✓] Done in {os.clock() - Start}`)
-	return { true, `Success in {os.clock() - Start}s!` }
+	return result
 end
 
 function AR.Ranks.GetAll()
-	local Current: Types.CurrentRanks = Var.DataStores.AdminsDS:GetAsync("CurrentRanks")
+	local Current: Types.CurrentRanks = Var.DataStores.AdminsDS:GetAsync("CurrentRanks") or Var.DefaultRankData
 	local Ranks = {}
-	local Polls = 0
 
-	for i, RankName in Current.Names do
-		task.spawn(function()
-			pcall(function()
-				Ranks[i] = Var.DataStores.AdminsDS:GetAsync(RankName)
-				print(Ranks[i])
-			end)
+	for _, RankName in Current.Names or {} do
+		local ok, rank = pcall(function()
+			return Var.DataStores.AdminsDS:GetAsync(RankName)
 		end)
-	end
-
-	repeat
-		Polls += 1
-
-		task.wait(0.1)
-
-		Util.Logging.Print("Rank check progress:", #Ranks / #Current.Names, Ranks, Current, Polls)
-	until #Ranks == #Current.Names or Polls == 10
-
-	if Polls == 10 then
-		Util.Logging.Warn(`Only managed to load {#Ranks / #Current.Names}% of ranks, possibly corrupt rank exists!`)
+		if ok and rank then
+			table.insert(Ranks, rank)
+		else
+			Util.Logging.Warn(`Could not load rank {RankName}: {tostring(rank)}`)
+		end
 	end
 
 	return Ranks
@@ -356,7 +364,10 @@ function AR.Socket(Msg)
 			elseif not AdminResult["IsAdmin"] and table.find(Var.Admins.InGame, Player) then
 				AR.Removing(Player)
 
-				Player.PlayerGui:FindFirstChild("AdministerMainPanel"):Destroy()
+				local panel = Player.PlayerGui:FindFirstChild("AdministerMainPanel")
+				if panel then
+					panel:Destroy()
+				end
 			end
 		end
 	end
